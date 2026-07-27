@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { buildCat } from './catBuilder.js';
+import { buildCat, EYE_SPACING_RANGE } from './catBuilder.js';
 import { COATS, EYE_COLORS, POSES } from './coats.js';
 import { createRng, randomSeed } from './rng.js';
 import {
@@ -149,7 +149,9 @@ const BODY_SLIDERS = [
 
 const EYE_SLIDERS = [
   { key: 'eyeSize',         name: '眼睛大小', min: 0.6, max: 1.7, step: 0.01 },
+  { key: 'eyeSpacing',      name: '眼距', min: EYE_SPACING_RANGE.min, max: EYE_SPACING_RANGE.max, step: 0.01 },
   { key: 'irisScale',       name: '瞳孔大小', min: 0.1, max: 1.3, step: 0.01 },
+  { key: 'irisHighlightScale', name: '瞳孔高光大小', min: 1, max: 2.4, step: 0.01 },
   { key: 'wateryEyeShape',  name: '泪眼形变', min: 0,   max: 2,   step: 0.01 },
 ];
 
@@ -167,13 +169,14 @@ const RANDOM_SLIDERS = [
   { key: 'tailLength', min: 0.58, max: 1.72, step: 0.01 },
   { key: 'tailCurl', min: -0.12, max: 1.18, step: 0.01 },
   { key: 'eyeSize', min: 0.82, max: 1.34, step: 0.01 },
+  { key: 'eyeSpacing', min: 0.72, max: EYE_SPACING_RANGE.max, step: 0.01 },
   { key: 'irisScale', min: 0.32, max: 1.02, step: 0.01 },
   { key: 'wateryEyeShape', min: 0.35, max: 1.45, step: 0.01 },
 ];
 
 const params = {
   seed: randomSeed(),
-  pose: 'loaf',
+  pose: 'stretch',
   containerSeed: randomSeed(),
   containerSize: 1,
   containerSoftBody: true,
@@ -187,7 +190,9 @@ const params = {
   legLength: 0.85,
   earSize: 1.0,
   eyeSize: 1.05,
+  eyeSpacing: EYE_SPACING_RANGE.default,
   irisScale: 0.65,
+  irisHighlightScale: 1,
   wateryEyes: false,
   wateryEyeShape: 1.1,
   tailLength: 0.95,
@@ -251,10 +256,10 @@ scene.fog = new THREE.Fog('#efe9dd', 14, 32);
 
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-camera.position.set(2.9, 1.7, 4.2);
+camera.position.set(2.9, 2.65, 4.2);
 
 const controls = new OrbitControls(camera, canvas);
-controls.target.set(0, 0.75, 0);
+controls.target.set(0, 0.5, 0);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.55;
 controls.minDistance = 1.6;
@@ -1681,11 +1686,7 @@ const motionSec = section('Motion', {
   badge: 'Experimental',
 });
 
-const bodySizeControls = document.createElement('div');
-bodySizeControls.className = 'body-size-controls';
-subLabel(bodySizeControls, '身体尺寸');
-bodySec.appendChild(bodySizeControls);
-const poseControls = controlGroup(bodySec, '姿势');
+const poseControls = controlGroup(bodySec, '姿势', { open: true });
 const staticPoseControls = document.createElement('div');
 staticPoseControls.className = 'pose-static-controls';
 poseControls.appendChild(staticPoseControls);
@@ -1741,6 +1742,11 @@ refreshers.push(chipGroup(
     rebuild('full');
   }
 ));
+
+const bodySizeControls = document.createElement('div');
+bodySizeControls.className = 'body-size-controls';
+subLabel(bodySizeControls, '身体尺寸');
+bodySec.appendChild(bodySizeControls);
 
 const motionExperimentNote = document.createElement('p');
 motionExperimentNote.className = 'experimental-note';
@@ -2674,7 +2680,9 @@ const shareCardCapture = createShareCardCapture({
   renderer,
   scene,
   camera,
+  controls,
   sceneCanvas: canvas,
+  getSubject: () => cat,
   getSeed: () => params.seed,
   getPalette: () => ({
     base: params.dynamicCoatBase,

@@ -27,6 +27,8 @@ export function createFishGrabHitArea() {
   area.name = 'fish-grab-hit-area';
   area.position.x = FISH_GRAB_HIT_AREA.centerX;
   area.userData.toyPickSurface = true;
+  area.userData.skipShadow = true;
+  area.castShadow = false;
   return area;
 }
 
@@ -39,6 +41,51 @@ export function createFishGrabHitArea() {
 const OUTLINE_COLOR = '#4a3428';
 // 刚体仍真实落地；只把可见网格抬高约 1–2 像素，防止反壳描边被接触面吞掉。
 const VISUAL_CONTACT_LIFT = 0.01;
+// 玩具使用贴地的独立阴影代理。真实网格会随物理碰撞弹起、翻滚；如果直接
+// 接受斜向主光投影，小体积玩具的影子会被放大到离本体很远。代理始终贴近
+// 地面/地毯接触层，只把轮廓写入 ShadowMap，不参与正常颜色和深度渲染。
+export const TOY_SHADOW_SURFACE_Y = 0.055;
+export const TOY_SHADOW_PROFILES = Object.freeze({
+  bed: Object.freeze({ x: 0.92, z: 0.75 }),
+  yarn: Object.freeze({ x: 0.92, z: 0.75 }),
+  ball: Object.freeze({ x: 0.95, z: 0.78 }),
+  fish: Object.freeze({ x: 0.98, z: 0.42 }),
+  duck: Object.freeze({ x: 0.82, z: 0.62 }),
+  toy: Object.freeze({ x: 0.88, z: 0.68 }),
+});
+
+export function createToyShadowProxy(kind, radius) {
+  const profile = TOY_SHADOW_PROFILES[kind] ?? TOY_SHADOW_PROFILES.toy;
+  const geometry = new THREE.CircleGeometry(1, 32);
+  const material = new THREE.MeshBasicMaterial({
+    color: '#ffffff',
+    side: THREE.DoubleSide,
+    colorWrite: false,
+    depthWrite: false,
+  });
+  const caster = new THREE.Mesh(geometry, material);
+  caster.name = `${kind}-contact-shadow-caster`;
+  caster.rotation.x = -Math.PI / 2;
+  caster.scale.set(radius * profile.x, radius * profile.z, 1);
+  caster.castShadow = true;
+  caster.receiveShadow = false;
+  caster.userData.toyShadowProxy = true;
+  // The color-pass material must not touch the framebuffer, while the shadow
+  // pass still needs a normal depth writer. Without this explicit override,
+  // Three.js inherits `depthWrite: false` and the proxy casts no shadow at all.
+  caster.customDepthMaterial = new THREE.MeshDepthMaterial({
+    side: THREE.DoubleSide,
+    depthWrite: true,
+    colorWrite: true,
+  });
+
+  const proxy = new THREE.Group();
+  proxy.name = `${kind}-contact-shadow-proxy`;
+  proxy.position.y = TOY_SHADOW_SURFACE_Y;
+  proxy.userData.toyShadowProxy = true;
+  proxy.add(caster);
+  return proxy;
+}
 
 function toonMat(color, gradientMap) {
   return new THREE.MeshToonMaterial({ color, gradientMap });
@@ -154,6 +201,7 @@ export function createToyWorld(scene) {
   const fishWorldQuat = new THREE.Quaternion();
   const fishLocalView = new THREE.Vector3();
   const fishEyeView = new THREE.Vector3();
+  const toyShadowEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
   function snapshotShape(shape, offset) {
     const base = {
@@ -177,20 +225,16 @@ export function createToyWorld(scene) {
   function addToy(mesh, body, radius, kind = 'toy') {
     mesh.traverse((o) => {
       if (!o.isMesh) return;
-      o.castShadow = true;
-      const materials = Array.isArray(o.material) ? o.material : [o.material];
-      for (const material of materials) {
-        // 和猫身体一致：用可见正面写 ShadowMap，避免开放网格或反壳描边
-        // 只用背面投影时形成空心阴影。
-        material.shadowSide = o.userData.doubleSidedShadow
-          ? THREE.DoubleSide
-          : THREE.FrontSide;
-      }
+      // 可见模型只负责自身 Toon 明暗；统一由贴地代理产生完整、不漂移的影子。
+      // 这也避免透明命中盒、反壳描边和双面鱼鳍把阴影扩成方块或毛边。
+      o.castShadow = false;
     });
-    group.add(mesh);
+    const shadowProxy = createToyShadowProxy(kind, radius);
+    group.add(mesh, shadowProxy);
     world.addBody(body);
     toys.push({
       mesh,
+      shadowProxy,
       body,
       kind,
       radius,
@@ -210,6 +254,7 @@ export function createToyWorld(scene) {
       toy.baseMeshScale.y * factor,
       toy.baseMeshScale.z * factor
     );
+    toy.shadowProxy.scale.setScalar(factor);
 
     for (let i = 0; i < toy.body.shapes.length; i++) {
       const shape = toy.body.shapes[i];
@@ -812,6 +857,13 @@ export function createToyWorld(scene) {
       t.mesh.position.copy(t.body.position);
       t.mesh.position.y += VISUAL_CONTACT_LIFT;
       t.mesh.quaternion.copy(t.body.quaternion);
+      t.shadowProxy.position.set(
+        t.body.position.x,
+        TOY_SHADOW_SURFACE_Y,
+        t.body.position.z
+      );
+      toyShadowEuler.setFromQuaternion(t.mesh.quaternion);
+      t.shadowProxy.rotation.y = toyShadowEuler.y;
     }
   }
 

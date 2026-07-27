@@ -10,6 +10,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:fish-pick": "node scripts/test_fish_pick_area.mjs",
+    "test:toy-shadow": "node scripts/test_toy_shadows.mjs",
     "test:motion": "node scripts/test_mesh2motion_rig.mjs",
     "test:poke": "node scripts/test_soft_poke.mjs",
     "test:share": "node scripts/test_share_card.mjs"

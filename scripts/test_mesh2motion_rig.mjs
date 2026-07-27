@@ -31,6 +31,8 @@ import { meshFromSDF, roundCone, roundedBox, sphere } from '../src/sdf.js';
 import { WEATHER_AMOUNT_LIMITS } from '../src/weather.js';
 import {
   CAT_MESH_QUALITY,
+  EYE_SPACING_RANGE,
+  resolveEyeHorizontalOffset,
   resolveCatMeshCellSize,
 } from '../src/catBuilder.js';
 import { createFlatFishTail } from '../src/fishTail.js';
@@ -44,6 +46,26 @@ const poses = [
   'sideFlat',
   'banana',
 ];
+assert.equal(
+  resolveEyeHorizontalOffset(1, EYE_SPACING_RANGE.max),
+  0.52,
+  'the previous eye distance must remain the manual maximum'
+);
+assert.equal(
+  resolveEyeHorizontalOffset(1, EYE_SPACING_RANGE.max + 1),
+  0.52,
+  'eye spacing must never exceed the previous eye distance'
+);
+assert.equal(
+  resolveEyeHorizontalOffset(1, EYE_SPACING_RANGE.min),
+  0.52 * EYE_SPACING_RANGE.min,
+  'the minimum must move both eyes inward without changing eye size'
+);
+assert.equal(
+  resolveEyeHorizontalOffset(1),
+  0.52,
+  'missing legacy parameters must preserve the current eye distance'
+);
 assert.ok(
   POSES.some(({ id }) => id === 'containerCrouch'),
   'static pose catalog must expose the container crouch pose'

@@ -1,3 +1,5 @@
+import * as THREE from 'three';
+
 const CARD_LAYOUT = Object.freeze({
   windowX: 0.08,
   windowY: 0.115,
@@ -11,6 +13,75 @@ export const SHARE_CARD_REPOSITORY = Object.freeze({
 });
 
 const CARD_TOTAL = 9999;
+
+const _subjectBounds = new THREE.Box3();
+const _subjectCenter = new THREE.Vector3();
+const _subjectView = new THREE.Vector3();
+const _cameraForward = new THREE.Vector3();
+const _cameraRight = new THREE.Vector3();
+const _cameraUp = new THREE.Vector3();
+const _projectedSubject = new THREE.Vector3();
+
+/**
+ * Compute the world-space camera/target translation needed to place the
+ * subject at the center of the card window. Translating camera and orbit
+ * target by the same vector preserves the user's rotation and zoom.
+ */
+export function getShareCardSubjectPanOffset({
+  camera,
+  subject,
+  frameRect,
+  canvasRect,
+}) {
+  const offset = new THREE.Vector3();
+  if (
+    !camera
+    || !subject
+    || !frameRect
+    || !canvasRect
+    || canvasRect.width <= 0
+    || canvasRect.height <= 0
+  ) return offset;
+
+  subject.updateWorldMatrix?.(true, true);
+  camera.updateMatrixWorld(true);
+  _subjectBounds.setFromObject(subject);
+  if (_subjectBounds.isEmpty()) return offset;
+  _subjectBounds.getCenter(_subjectCenter);
+
+  const desiredNdcX = (
+    ((frameRect.left + frameRect.width * 0.5) - canvasRect.left)
+    / canvasRect.width
+  ) * 2 - 1;
+  const desiredNdcY = -(
+    (
+      ((frameRect.top + frameRect.height * 0.5) - canvasRect.top)
+      / canvasRect.height
+    ) * 2 - 1
+  );
+  _projectedSubject.copy(_subjectCenter).project(camera);
+
+  camera.getWorldDirection(_cameraForward);
+  _subjectView.copy(_subjectCenter).sub(camera.position);
+  const depth = _subjectView.dot(_cameraForward);
+  if (!Number.isFinite(depth) || depth <= camera.near) return offset;
+
+  const worldHeight = 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+  const worldWidth = worldHeight * camera.aspect;
+  _cameraRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+  _cameraUp.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+
+  offset
+    .addScaledVector(
+      _cameraRight,
+      (_projectedSubject.x - desiredNdcX) * worldWidth * 0.5
+    )
+    .addScaledVector(
+      _cameraUp,
+      (_projectedSubject.y - desiredNdcY) * worldHeight * 0.5
+    );
+  return offset;
+}
 
 const CARD_THEMES = Object.freeze([
   {
@@ -599,7 +670,9 @@ export function createShareCardCapture({
   renderer,
   scene,
   camera,
+  controls,
   sceneCanvas,
+  getSubject,
   getSeed,
   getPalette,
   getLocale,
@@ -658,6 +731,36 @@ export function createShareCardCapture({
   let skinVariant = 0;
   let descriptor = getShareCardDescriptor(getSeed(), getPalette?.(), skinVariant);
   let active = false;
+  let cameraPanFrame = 0;
+
+  function alignSubjectToCard() {
+    const subject = getSubject?.();
+    if (!active || !subject || !controls) return;
+    const offset = getShareCardSubjectPanOffset({
+      camera,
+      subject,
+      frameRect: windowEl.getBoundingClientRect(),
+      canvasRect: sceneCanvas.getBoundingClientRect(),
+    });
+    if (offset.lengthSq() < 1e-8) return;
+
+    cancelAnimationFrame(cameraPanFrame);
+    const startedAt = performance.now();
+    const duration = 280;
+    const startCamera = camera.position.clone();
+    const startTarget = controls.target.clone();
+    const tick = (now) => {
+      if (!active) return;
+      const linear = THREE.MathUtils.clamp((now - startedAt) / duration, 0, 1);
+      const eased = 1 - Math.pow(1 - linear, 3);
+      camera.position.copy(startCamera).addScaledVector(offset, eased);
+      controls.target.copy(startTarget).addScaledVector(offset, eased);
+      controls.update();
+      viewport.dataset.shareCardAutoPan = eased.toFixed(3);
+      if (linear < 1) cameraPanFrame = requestAnimationFrame(tick);
+    };
+    cameraPanFrame = requestAnimationFrame(tick);
+  }
 
   function syncCopy() {
     const copy = localeCopy(getLocale());
@@ -706,12 +809,16 @@ export function createShareCardCapture({
     overlay.hidden = false;
     overlay.setAttribute('aria-hidden', 'false');
     viewport.dataset.shareCardOpen = 'true';
-    requestAnimationFrame(() => overlay.classList.add('is-open'));
+    requestAnimationFrame(() => {
+      overlay.classList.add('is-open');
+      requestAnimationFrame(alignSubjectToCard);
+    });
   }
 
   function close() {
     if (!active) return;
     active = false;
+    cancelAnimationFrame(cameraPanFrame);
     overlay.classList.remove('is-open');
     viewport.dataset.shareCardOpen = 'false';
     window.setTimeout(() => {

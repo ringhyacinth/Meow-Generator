@@ -30,6 +30,19 @@ export const CAT_MESH_QUALITY = Object.freeze({
   draftMaxVolumeScale: 1.24,
 });
 
+export const EYE_SPACING_RANGE = Object.freeze({
+  min: 0.55,
+  max: 1,
+  default: 1,
+});
+
+export function resolveEyeHorizontalOffset(headRadius, eyeSpacing = EYE_SPACING_RANGE.default) {
+  const spacing = Number.isFinite(eyeSpacing)
+    ? THREE.MathUtils.clamp(eyeSpacing, EYE_SPACING_RANGE.min, EYE_SPACING_RANGE.max)
+    : EYE_SPACING_RANGE.default;
+  return headRadius * 0.52 * spacing;
+}
+
 export function resolveCatMeshCellSize(
   quality = 'full',
   boundsVolume = CAT_MESH_REFERENCE_VOLUME,
@@ -761,7 +774,13 @@ function traceContour(ctx, contour, yOffset = 0, yScale = 1) {
   ctx.closePath();
 }
 
-function createEyeTexture(irisColor, irisRatio, wateryAmount, innerSide) {
+function createEyeTexture(
+  irisColor,
+  irisRatio,
+  wateryAmount,
+  innerSide,
+  irisHighlightScale = 1
+) {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 512;
   const ctx = canvas.getContext('2d');
@@ -821,7 +840,13 @@ function createEyeTexture(irisColor, irisRatio, wateryAmount, innerSide) {
     ctx.strokeStyle = '#4a3428';
     ctx.stroke();
 
-    const highlightScale = 0.85 + a * 0.055;
+    // The current artwork is the minimum: the user can make both highlights
+    // larger together, but never shrink them into invisible dots.
+    const highlightScale = (0.85 + a * 0.055) * THREE.MathUtils.clamp(
+      irisHighlightScale,
+      1,
+      2.4
+    );
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
     ctx.arc(22, -24, 16 * highlightScale, 0, Math.PI * 2);
@@ -884,9 +909,25 @@ function makeSurfacePatch(prims, headC, centerDir, width, height, depth, segment
   return geometry;
 }
 
-function makeEyeDecal(prims, headC, centerDir, eyeR, irisColor, irisRatio, wateryAmount, innerSide) {
+function makeEyeDecal(
+  prims,
+  headC,
+  centerDir,
+  eyeR,
+  irisColor,
+  irisRatio,
+  wateryAmount,
+  innerSide,
+  irisHighlightScale
+) {
   const center = surfaceAlong(prims, headC, centerDir, eyeR, eyeR * 8);
-  const painter = createEyeTexture(irisColor, irisRatio, wateryAmount, innerSide);
+  const painter = createEyeTexture(
+    irisColor,
+    irisRatio,
+    wateryAmount,
+    innerSide,
+    irisHighlightScale
+  );
   const geometry = makeSurfacePatch(
     prims,
     headC,
@@ -1185,7 +1226,8 @@ function createTransientFluffController(furGeometry, outlineGeometry, seed, head
  * v0.3 形态语言：粘土玩具小猫
  * —— 头埋进身体（无脖子）、矮胖水滴身、短粗腿、小圆耳、低位宽距大眼。
  * params: seed, pose, coatId, eyeColor, oddEyes, eyeColorRight,
- *  headSize, chubbiness, legLength, earSize, eyeSize, irisScale,
+ *  headSize, chubbiness, legLength, earSize, eyeSize, eyeSpacing,
+ *  irisScale, irisHighlightScale,
  *  wateryEyes, wateryEyeShape, tailLength, tailCurl
  * quality: 'draft' | 'full'
  */
@@ -2215,7 +2257,7 @@ export function buildCat(params, quality = 'full') {
 
   // 眼睛：纹理投射到头部真实曲面，侧视不会再露出独立白色圆片。
   const eyeR = hr * 0.26 * params.eyeSize;
-  const ex = hr * 0.52;
+  const ex = resolveEyeHorizontalOffset(hr, params.eyeSpacing);
   const ey = headC.y - hr * 0.06;
   const effectiveIrisScale = THREE.MathUtils.clamp(params.irisScale ?? 0.65, 0.1, 1.3);
   const irisRatio = THREE.MathUtils.clamp(0.8 * effectiveIrisScale, 0.12, 0.92);
@@ -2232,7 +2274,8 @@ export function buildCat(params, quality = 'full') {
       irisColor,
       irisRatio,
       params.wateryEyes ? (params.wateryEyeShape ?? 1.1) : 0,
-      -s
+      -s,
+      params.irisHighlightScale ?? 1
     );
     eyeAnimators.push(eye.userData.eyeAnimator);
     face.add(eye);

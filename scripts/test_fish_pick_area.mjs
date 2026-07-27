@@ -19,6 +19,8 @@ function rayHitsAt(x, y) {
 assert.equal(area.userData.toyPickSurface, true, 'fish hit area must be selectable');
 assert.equal(area.material.opacity, 0, 'fish hit area must stay invisible');
 assert.equal(area.material.colorWrite, false, 'fish hit area must not alter the frame');
+assert.equal(area.castShadow, false, 'the invisible box must never cast a square fish shadow');
+assert.equal(area.userData.skipShadow, true, 'toy setup must preserve the no-shadow marker');
 assert(
   rayHitsAt(-0.38, 0),
   'the tail-side margin should be draggable outside the narrow body mesh'
